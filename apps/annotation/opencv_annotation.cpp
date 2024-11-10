@@ -64,14 +64,19 @@ Adapted by: Puttemans Steven - April 2016 - Vectorize the process to enable bett
 using namespace std;
 using namespace cv;
 
+struct RectBool {
+    Rect currentRect;
+    bool background;
+};
+
 // Function prototypes
 void on_mouse(int, int, int, int, void*);
-vector<Rect> get_annotations(Mat);
+vector<RectBool> get_annotations(Mat);
 
 // Public parameters
 Mat image;
 int roi_x0 = 0, roi_y0 = 0, roi_x1 = 0, roi_y1 = 0, num_of_rec = 0;
-bool start_draw = false, stop = false;
+bool start_draw = false, stop = false, background = false;
 
 // Window name for visualisation purposes
 const string window_name = "OpenCV Based Annotation Tool";
@@ -108,12 +113,13 @@ void on_mouse(int event, int x, int y, int , void * )
 }
 
 // FUNCTION : returns a vector of Rect objects given an image containing positive object instances
-vector<Rect> get_annotations(Mat input_image)
+vector<RectBool> get_annotations(Mat input_image)
 {
-    vector<Rect> current_annotations;
+    vector<RectBool> current_annotations;
 
     // Make it possible to exit the annotation process
     stop = false;
+    background = false;
 
     // Init window interface and couple mouse actions
     namedWindow(window_name, WINDOW_AUTOSIZE);
@@ -132,6 +138,7 @@ vector<Rect> get_annotations(Mat input_image)
         // Keys for processing
         // You need to select one for confirming a selection and one to continue to the next image
         // Based on the universal ASCII code of the keystroke: http://www.asciitable.com/
+        //      b = 99          mark image as background
         //      c = 99		    add rectangle to current image
         //	    n = 110		    save added rectangles and show next image
         //      d = 100         delete the last annotation made
@@ -141,6 +148,10 @@ vector<Rect> get_annotations(Mat input_image)
         {
         case 27:
                 stop = true;
+                break;
+        case 98: 
+                background = true;
+                current_annotations.push_back({currentRect, background});
                 break;
         case 99:
                 // Draw initiated from top left corner
@@ -177,7 +188,7 @@ vector<Rect> get_annotations(Mat input_image)
                 }
                 // Draw the rectangle on the canvas
                 // Add the rectangle to the vector of annotations
-                current_annotations.push_back(currentRect);
+                current_annotations.push_back({currentRect, background});
                 break;
         case 100:
                 // Remove the last annotation
@@ -192,14 +203,14 @@ vector<Rect> get_annotations(Mat input_image)
         }
 
         // Check if escape has been pressed
-        if(stop)
+        if(stop || background)
         {
             break;
         }
 
         // Draw all the current rectangles onto the top image and make sure that the global image is linked
         for(int i=0; i < (int)current_annotations.size(); i++){
-            rectangle(temp_image, current_annotations[i], Scalar(0,255,0), 1);
+            rectangle(temp_image, current_annotations[i].currentRect, Scalar(0,255,0), 1);
         }
         image = temp_image;
 
@@ -245,7 +256,7 @@ int main( int argc, const char** argv )
 
     // Start by processing the data
     // Return the image filenames inside the image folder
-    map< String, vector<Rect> > annotations;
+    map< String, vector<RectBool> > annotations;
     vector<String> filenames;
     String folder(image_folder);
     glob(folder, filenames);
@@ -255,6 +266,7 @@ int main( int argc, const char** argv )
     cout << "* press 'c' to accept a selection," << endl;
     cout << "* press 'd' to delete the latest selection," << endl;
     cout << "* press 'n' to proceed with next image," << endl;
+    cout << "* press 'b' to mark image as background," << endl;
     cout << "* press 'esc' to stop." << endl;
 
     // Loop through each image stored in the images folder
@@ -277,13 +289,14 @@ int main( int argc, const char** argv )
 
         // Perform annotations & store the result inside the vectorized structure
         // If the image was resized before, then resize the found annotations back to original dimensions
-        vector<Rect> current_annotations = get_annotations(current_image);
+        vector<RectBool> current_annotations = get_annotations(current_image);
         if(resize_bool){
             for(int j =0; j < (int)current_annotations.size(); j++){
-                current_annotations[j].x = current_annotations[j].x * resizeFactor;
-                current_annotations[j].y = current_annotations[j].y * resizeFactor;
-                current_annotations[j].width = current_annotations[j].width * resizeFactor;
-                current_annotations[j].height = current_annotations[j].height * resizeFactor;
+                Rect currentRect = current_annotations[j].currentRect;
+                currentRect.x = currentRect.x * resizeFactor;
+                currentRect.y = currentRect.y * resizeFactor;
+                currentRect.width = currentRect.width * resizeFactor;
+                currentRect.height = currentRect.height * resizeFactor;
             }
         }
         annotations[filenames[i]] = current_annotations;
@@ -303,11 +316,16 @@ int main( int argc, const char** argv )
     }
 
     // Store the annotations, write to the output file
-    for(map<String, vector<Rect> >::iterator it = annotations.begin(); it != annotations.end(); it++){
-        vector<Rect> &anno = it->second;
+    for(map<String, vector<RectBool> >::iterator it = annotations.begin(); it != annotations.end(); it++){
+        vector<RectBool> &anno = it->second;
         output << it->first << " " << anno.size();
         for(size_t j=0; j < anno.size(); j++){
-            Rect temp = anno[j];
+            if (anno[j].background)
+            {
+                output << " bg";
+                break;
+            }
+            Rect temp = anno[j].currentRect;
             output << " " << temp.x << " " << temp.y << " " << temp.width << " " << temp.height;
         }
         output << endl;
